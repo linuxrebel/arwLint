@@ -72,6 +72,39 @@ same *per decision* as a 3-finding one.
 
 ---
 
+## What this will do
+
+Installing a plugin means running someone else's code. "Read the source first"
+is advice nobody follows, so here is what this one actually touches — check it
+against `plugin.py` if you want, but you should not have to read 400 lines to
+decide.
+
+**It will:**
+
+- Read and rewrite the `.py` file you point `/lint` at, one line at a time, and
+  only after you approve each change
+- Write a `.bak` beside that file before the first change, so the original is
+  recoverable
+- Run `autopep8` over the file once at the end, to fix every style finding in
+  one pass
+- Append a line to `DEBT.md` in your working directory when you answer `defer`
+- Rename the file, but only if the finding is about the filename and only if
+  you answer `fix` to that specific one
+- Run `pylint` and `autopep8` as subprocesses
+- Send short snippets — the finding, plus a few lines around it — to whichever
+  model agentRW is pointed at. If that is a cloud model, those lines leave your
+  machine
+
+**It will not:**
+
+- Touch any file except the one you named, and nothing outside agentRW's write
+  scope
+- Apply anything you have not seen and agreed to
+- Install packages, change your configuration, or reach the network itself
+- Keep the file if the result stops compiling — the whole run is reverted
+
+---
+
 ## Requirements
 
 - [agentRW](https://github.com/linuxrebel/agentRW) with plugin API 1 or later
@@ -96,10 +129,6 @@ files into place. Install agentRW first — see
 ```bash
 git clone https://github.com/linuxrebel/arwLint
 ```
-
-**Read `plugin.py` before going further.** Installing a plugin means running
-someone else's code, and this one edits your source files. It is one file; read
-it.
 
 ### Linux and macOS
 
