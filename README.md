@@ -142,26 +142,35 @@ sudo cp arwLint/install.md arwLint/plugin.py /opt/agentRW/tools/linuxrebel/lint/
 
 ### Windows
 
-agentRW installs per-user, so no administrator rights are needed:
+In **PowerShell**. agentRW installs per-user, so no administrator rights are
+needed:
 
+```powershell
+$dest = "$env:LOCALAPPDATA\Programs\agentRW\tools\linuxrebel\lint"
+New-Item -ItemType Directory -Force -Path $dest
+Copy-Item arwLint\install.md, arwLint\plugin.py -Destination $dest
 ```
-mkdir "%LOCALAPPDATA%\Programs\agentRW\tools\linuxrebel\lint"
-copy arwLint\install.md "%LOCALAPPDATA%\Programs\agentRW\tools\linuxrebel\lint\"
-copy arwLint\plugin.py  "%LOCALAPPDATA%\Programs\agentRW\tools\linuxrebel\lint\"
-```
+
+These will not work in cmd — `$env:` is PowerShell syntax. If you are in cmd,
+open PowerShell instead.
 
 ### Check it took
 
-Start `cagent` and run `/plugins`. You should see:
+Restart `cagent` — plugins are discovered at startup, so a session that was
+already running will not see it. Then run `/plugins`:
 
 ```
-  linuxrebel/lint  v0.1.0  ACTIVE   tools: lint_file; commands: /lint
+  linuxrebel/lint ACTIVE   tools: lint_file; commands: /lint
       needs pylint: found
+      needs autopep8: found
 ```
 
-If it says `needs pylint: MISSING`, install pylint and autopep8 (see
-Requirements above) — the plugin does not register at all without them, so
-`/lint` will not exist.
+If `/plugins` does not list it at all, the files are in the wrong place — the
+directory must be exactly `tools/linuxrebel/lint/` and must contain both
+`install.md` and `plugin.py`.
+
+If it says `MISSING` against either requirement, the plugin does not register
+at all, so `/lint` will not exist. Install them (below) and restart.
 
 Then `/lint help`, and `/lint somefile.py` for the real thing.
 
@@ -186,9 +195,16 @@ echo 'export PATH="$HOME/Library/Python/3.9/bin:$PATH"' >> ~/.zshrc
 
 Delete the directory. Nothing else is written anywhere.
 
+Linux and macOS:
+
 ```bash
-sudo rm -rf /opt/agentRW/tools/linuxrebel/lint                    # Linux, macOS
-rmdir /s "%LOCALAPPDATA%\Programs\agentRW\tools\linuxrebel\lint"  # Windows
+sudo rm -rf /opt/agentRW/tools/linuxrebel/lint
+```
+
+Windows, in PowerShell:
+
+```powershell
+Remove-Item -Recurse "$env:LOCALAPPDATA\Programs\agentRW\tools\linuxrebel\lint"
 ```
 
 Note that reinstalling agentRW itself preserves `tools/`, so plugins survive an
