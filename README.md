@@ -89,18 +89,81 @@ Without them `/lint` is not registered at all, and `/plugins` says why.
 
 ## Install
 
-Manual, until agentRW's installer lands:
+agentRW has no plugin installer yet, so a plugin is installed by copying two
+files into place. Install agentRW first — see
+[its README](https://github.com/linuxrebel/agentRW) — then:
 
 ```bash
 git clone https://github.com/linuxrebel/arwLint
-mkdir -p /path/to/agentRW/tools/linuxrebel/lint
-cp arwLint/{install.md,plugin.py} /path/to/agentRW/tools/linuxrebel/lint/
 ```
 
-Read `plugin.py` before you do. Installing a plugin means running someone's
-code, and this one edits your files.
+**Read `plugin.py` before going further.** Installing a plugin means running
+someone else's code, and this one edits your source files. It is one file; read
+it.
 
-Uninstall by deleting the directory.
+### Linux and macOS
+
+agentRW installs to `/opt/agentRW`, which is owned by root, so copying a plugin
+in needs `sudo`:
+
+```bash
+sudo mkdir -p /opt/agentRW/tools/linuxrebel/lint
+sudo cp arwLint/install.md arwLint/plugin.py /opt/agentRW/tools/linuxrebel/lint/
+```
+
+### Windows
+
+agentRW installs per-user, so no administrator rights are needed:
+
+```
+mkdir "%LOCALAPPDATA%\Programs\agentRW\tools\linuxrebel\lint"
+copy arwLint\install.md "%LOCALAPPDATA%\Programs\agentRW\tools\linuxrebel\lint\"
+copy arwLint\plugin.py  "%LOCALAPPDATA%\Programs\agentRW\tools\linuxrebel\lint\"
+```
+
+### Check it took
+
+Start `cagent` and run `/plugins`. You should see:
+
+```
+  linuxrebel/lint  v0.1.0  ACTIVE   tools: lint_file; commands: /lint
+      needs pylint: found
+```
+
+If it says `needs pylint: MISSING`, install pylint and autopep8 (see
+Requirements above) — the plugin does not register at all without them, so
+`/lint` will not exist.
+
+Then `/lint help`, and `/lint somefile.py` for the real thing.
+
+### If pylint or autopep8 are missing
+
+See Requirements above for the distro packages, which are the better option.
+With pip, use `python3 -m pip` rather than bare `pip`, so it installs for the
+interpreter that runs agentRW:
+
+```bash
+python3 -m pip install --user pylint autopep8
+```
+
+On macOS a `--user` install puts the executables in `~/Library/Python/3.9/bin`,
+which is not on `PATH` by default:
+
+```bash
+echo 'export PATH="$HOME/Library/Python/3.9/bin:$PATH"' >> ~/.zshrc
+```
+
+## Uninstall
+
+Delete the directory. Nothing else is written anywhere.
+
+```bash
+sudo rm -rf /opt/agentRW/tools/linuxrebel/lint                    # Linux, macOS
+rmdir /s "%LOCALAPPDATA%\Programs\agentRW\tools\linuxrebel\lint"  # Windows
+```
+
+Note that reinstalling agentRW itself preserves `tools/`, so plugins survive an
+upgrade. Uninstalling agentRW removes them.
 
 ---
 
