@@ -150,8 +150,8 @@ def _abs(filename: str) -> Path:
 
 
 def lint_file_tool(filename: str, symbol: str = "") -> Dict[str, Any]:
-    """Lint a Python file with pylint. Returns score and most common issues.
-    Pass symbol (e.g. "unused-import") to list every occurrence of one."""
+    """Pylint a Python file. Returns score and top issues.
+    symbol (e.g. "unused-import") lists every occurrence of one."""
     p = _abs(filename)
     if not p.is_file():
         return {"error": "file_not_found", "file_path": str(p)}
