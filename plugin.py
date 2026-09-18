@@ -225,6 +225,153 @@ REQUIRES = {
     "pylint": {"pip": "pylint", "fedora": "python3-pylint", "debian": "pylint"},
 }
 
+
+# ---------------------------------------------------------------------------
+# Fix pipeline — private to this plugin.
+#
+# This used to live in the agentRW core (six ctx.* helpers). It is lint-shaped,
+# so it belongs here, not in the harness. The only model access it needs is
+# ctx.ask (harness plugin API 2+); everything else is pure or goes through the
+# stable ctx names (tools, resolve_path).
+# ---------------------------------------------------------------------------
+DEBT_FILE = "DEBT.md"
+
+FIX_PROMPT = """You rewrite ONE line of Python to fix one specific issue. Output \
+ONLY that line, no explanation, no fences, no commentary. Keep the leading \
+whitespace correct for the surrounding block. Change nothing except what the \
+issue asks for. If rewriting this line cannot fix the issue, output UNFIXABLE."""
+
+INSERT_PROMPT = """You write ONE new line of Python to insert into a file. Output \
+ONLY that line, no explanation, no fences, no commentary. Match the surrounding \
+indentation exactly. If you cannot, output UNFIXABLE."""
+
+
+def _parses(text):
+    try:
+        compile(text, "<check>", "exec")
+        return True
+    except SyntaxError:
+        return False
+
+
+def _clean_proposal(raw):
+    """One usable line, or "" — never partly-usable garbage. Leading whitespace
+    is never stripped: for a bad-indentation fix, that whitespace IS the fix."""
+    if "UNFIXABLE" in raw.upper():
+        return ""
+    lines = [ln for ln in raw.rstrip().splitlines()
+             if ln.strip() and not re.match(r'^\s*```', ln)]
+    if len(lines) != 1:
+        return ""
+    one = lines[0].rstrip()
+    m = re.match(r'^(\s*)`+(.*?)`+$', one)
+    return f"{m.group(1)}{m.group(2)}" if m else one
+
+
+def _apply_insert(lines, finding, new):
+    """Insert `new` for an insert_top / insert_after finding, joining the block
+    the body actually uses rather than imposing PEP 8 on it."""
+    if finding.get("action_kind") == "insert_top":
+        # A shebang only works as line 1; insert below it.
+        at, indent = (1 if lines and lines[0].startswith("#!") else 0), ""
+    else:
+        at = finding["line"]
+        indent = ""
+        for nxt in lines[finding["line"]:]:
+            if nxt.strip():
+                indent = re.match(r'\s*', nxt).group(0)
+                break
+        own = re.match(r'\s*', lines[finding["line"] - 1]).group(0)
+        if len(indent) <= len(own):
+            # `def f(): pass` — no block to join; inserting is a syntax error.
+            return list(lines)
+    out = list(lines)
+    out.insert(at, f"{indent}{new.strip()}\n")
+    return out
+
+
+def _finish_run(path, snapshot):
+    """After all edits: if a parseable file is now broken, put it back."""
+    if path.suffix != ".py" or not _parses(snapshot):
+        return True
+    if _parses(path.read_text(encoding="utf-8")):
+        return True
+    path.write_text(snapshot, encoding="utf-8")
+    return False
+
+
+def _gather_findings(ctx, path, only=""):
+    """Flatten lint output into individual findings, bottom-up so a fix's line
+    number stays valid as edits shift lines below it."""
+    lint = ctx.tools.get("lint_file")
+    if not lint:
+        return []
+    res = lint(filename=path, symbol=only or "*")
+    if "error" in res:
+        return [{"error": res["error"]}]
+    out = [{**o, "symbol": o.get("symbol", only)} for o in res.get("occurrences", [])]
+    return sorted(out, key=lambda f: -f["line"])
+
+
+def _propose_fix(ctx, lines, finding):
+    """Ask the model to rewrite (or insert) one line via ctx.ask."""
+    n = finding["line"]
+    lo, hi = max(n - 3, 0), min(n + 2, len(lines))
+    context = "".join(f"{i+1}: {lines[i]}" for i in range(lo, hi))
+    target = lines[n - 1].rstrip("\n")
+    kind = finding.get("action_kind", "line")
+    if kind in ("insert_after", "insert_top"):
+        where = "at the very top of the file" if kind == "insert_top" \
+            else f"immediately after line {n}"
+        msgs = [{"role": "system", "content": INSERT_PROMPT},
+                {"role": "user", "content": (
+                    f"Issue: {finding['symbol']} — {finding['message']}\n"
+                    f"Goal: {finding.get('action', '')}\n\n"
+                    f"Context:\n{context}\n"
+                    f"Write the ONE line to insert {where}.")}]
+    else:
+        msgs = [{"role": "system", "content": FIX_PROMPT},
+                {"role": "user", "content": (
+                    f"Issue: {finding['symbol']} — {finding['message']}\n"
+                    f"Goal: {finding.get('action', 'fix the issue on this line')}\n\n"
+                    f"Context:\n{context}\n"
+                    f"Rewrite ONLY line {n}:\n{target}")}]
+    raw = ctx.ask(msgs, max_tokens=300, send_tools=False) or ""
+    return _clean_proposal(raw)
+
+
+def _propose_or_compute(ctx, lines, finding):
+    """The fix — computed when the detector already knows it (reindent),
+    generated via the model only when judgement is required."""
+    kind = finding.get("action_kind", "line")
+    if kind.startswith("reindent"):
+        want = int(kind.split(":")[1]) if ":" in kind else 4
+        return " " * want + lines[finding["line"] - 1].lstrip().rstrip("\n")
+    return _propose_fix(ctx, lines, finding)
+
+
+def _apply_fix(ctx, path, lines, finding, new):
+    """Apply one fix per its action_kind — the only place that decides
+    replace-vs-insert. Validation is deferred to _finish_run."""
+    kind = finding.get("action_kind", "line")
+    if kind == "line" or kind.startswith("reindent"):
+        out = list(lines)
+        out[finding["line"] - 1] = new + "\n"
+    elif kind.startswith("insert"):
+        out = _apply_insert(lines, finding, new)
+    else:
+        return {"error": "no_automatic_fix", "action_kind": kind}
+    return ctx.tools["write_file"](str(path), "".join(out))
+
+
+def _defer(ctx, path, finding, note=""):
+    """Deferred work goes to a ledger instead of evaporating."""
+    ledger = ctx.resolve_path(DEBT_FILE)
+    with open(ledger, "a", encoding="utf-8") as f:
+        f.write(f"- [ ] {path}:{finding['line']} {finding['symbol']} — "
+                f"{finding['message']}{(' (' + note + ')') if note else ''}\n")
+
+
 if shutil.which("pylint"):
 
     def lint_command(ctx, args: str) -> None:
