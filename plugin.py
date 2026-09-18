@@ -396,6 +396,11 @@ If the finished file does not compile, the whole run is reverted.
 Requires: pylint (findings), autopep8 (style fixes).""")
             return
 
+        if getattr(ctx, "api", 1) < 2:
+            print("[Lint] needs agentRW plugin API 2+ (host has "
+                  f"{getattr(ctx, 'api', 1)}). Update agentRW.")
+            return
+
         _fp = ["/lint"] + args.split()
         if len(_fp) < 2:
             print("[Lint] usage: /lint <file> [symbol] [max=N]")
@@ -404,7 +409,7 @@ Requires: pylint (findings), autopep8 (style fixes).""")
         _only = next((t for t in _fp[2:] if "=" not in t), "")
         _cap = next((int(t.split("=")[1]) for t in _fp[2:]
                      if t.startswith("max=")), 20)
-        _findings = ctx.gather_findings(_target, _only)
+        _findings = _gather_findings(ctx, _target, _only)
         if _findings and "error" in _findings[0]:
             print(f"[Lint] {_findings[0]['error']}")
             return
@@ -458,7 +463,7 @@ Requires: pylint (findings), autopep8 (style fixes).""")
             # turned into a shebang edit.
             _new = ""
             if _kind.startswith(("reindent", "line", "insert")):
-                _new = ctx.propose_fix(ctx.model, ctx.cfg, ctx.layers, _lines, _f)
+                _new = _propose_or_compute(ctx, _lines, _f)
                 if not _new:
                     print("  (no fix could be produced)")
                 elif _kind.startswith("reindent"):
@@ -492,7 +497,7 @@ Requires: pylint (findings), autopep8 (style fixes).""")
                 break
             if _new and _ans.startswith("f"):
                 if _kind != "rename":
-                    _r = ctx.apply_fix(_path, _lines, _f, _new)
+                    _r = _apply_fix(ctx, _path, _lines, _f, _new)
                     print(f"  {ctx.summarise('write_file', _r)}")
                 elif _kind == "rename":
                     _dest = Path(_new)
@@ -513,8 +518,8 @@ Requires: pylint (findings), autopep8 (style fixes).""")
                       f"{f' ({_same} findings)' if _same > 1 else ''}")
                 _ignored += 1
             elif _ans.startswith("d"):
-                ctx.defer(_target, _f)
-                print(f"  deferred -> {ctx.debt_file}")
+                _defer(ctx, _target, _f)
+                print(f"  deferred -> {DEBT_FILE}")
                 _deferred += 1
             else:
                 _skipped += 1
@@ -531,7 +536,7 @@ Requires: pylint (findings), autopep8 (style fixes).""")
 
         print(f"\n[Lint] {_fixed} fixed, {_skipped} skipped, "
               f"{_ignored} ignored, {_deferred} deferred.")
-        if not ctx.finish_run(_path, _snapshot):
+        if not _finish_run(_path, _snapshot):
             print(f"{ctx.colour}[Lint]{ctx.reset} The result no longer "
                   f"compiles — all changes reverted. {_path.name} is as it was.")
         return
